@@ -126,17 +126,40 @@ impl UnitRanged {
         f64::from_bits(result)
     }
 
+    /// Multiplicate two `UnitRanged`
+    /// 
+    /// May be error while mul, there is should use:
+    /// ```rust
+    /// a.to_f32() * b.to_f32();
+    /// // or
+    /// a.to_f64() * b.to_f64();
+    /// ```
     #[inline]
-    const fn _mul(self, other: Self) -> Self {
-        let x = ((self.0 as u64 * other.0 as u64) >> 32) as u32;
-        Self(x)
+    pub const fn _mul(self, other: Self) -> Self {
+        let a = self.0 as u64;
+        let b = other.0 as u64;
+        let product = a * b;
+        let max_product_normalize = ((a == u32::MAX as u64) & (b == u32::MAX as u64)) as u64;
+        let x = ((product + (1 << 31)) >> 32) + max_product_normalize;
+        
+        Self(x as u32)
     }
 
+    #[inline]
+    pub const fn saturating_add(self, other: Self) -> Self {
+        Self(self.0.saturating_add(other.0))
+    }
+
+    #[inline]
+    pub const fn wrapping_add(self, other: Self) -> Self {
+        Self(self.0.wrapping_add(other.0))
+    }
 }
 
 impl Mul for UnitRanged {
     type Output = Self;
 
+    /// Redirect to `UnitRanged::_mul(ohter)`
     #[inline]
     fn mul(self, rhs: Self) -> Self::Output {
         self._mul(rhs)
@@ -161,6 +184,34 @@ impl Debug for UnitRanged {
     }
 }
 
+impl From<f32> for UnitRanged {
+    #[inline(always)]
+    fn from(value: f32) -> Self {
+        Self::from_f32(value)
+    }
+}
+
+impl From<f64> for UnitRanged {
+    #[inline(always)]
+    fn from(value: f64) -> Self {
+        Self::from_f64(value)
+    }
+}
+
+impl From<UnitRanged> for f32 {
+    #[inline(always)]
+    fn from(value: UnitRanged) -> Self {
+        value.to_f32()
+    }
+}
+
+impl From<UnitRanged> for f64 {
+    #[inline(always)]
+    fn from(value: UnitRanged) -> Self {
+        value.to_f64()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Instant;
@@ -174,6 +225,7 @@ mod tests {
         assert_eq!(UnitRanged::from_f32(144.4), UnitRanged::from_raw(u32::MAX));
         assert_eq!(UnitRanged::from_f32(1e-45), UnitRanged::from_raw(0));
         assert_eq!(UnitRanged::from_f32(0.5), UnitRanged::from_raw(u32::MAX / 2 + 1));
+        assert_eq!(UnitRanged::from_f32(f32::NAN), UnitRanged::MIN);
     }
 
     #[test]
@@ -227,11 +279,12 @@ mod tests {
 
     #[test]
     fn from_f64_test() {
-        assert_eq!(UnitRanged::from_f32(0.0), UnitRanged::from_raw(0));
-        assert_eq!(UnitRanged::from_f32(1.0), UnitRanged::from_raw(u32::MAX));
-        assert_eq!(UnitRanged::from_f32(144.4), UnitRanged::from_raw(u32::MAX));
-        assert_eq!(UnitRanged::from_f32(1e-45), UnitRanged::from_raw(0));
-        assert_eq!(UnitRanged::from_f32(0.5), UnitRanged::from_raw(u32::MAX / 2 + 1));
+        assert_eq!(UnitRanged::from_f64(0.0), UnitRanged::from_raw(0));
+        assert_eq!(UnitRanged::from_f64(1.0), UnitRanged::from_raw(u32::MAX));
+        assert_eq!(UnitRanged::from_f64(144.4), UnitRanged::from_raw(u32::MAX));
+        assert_eq!(UnitRanged::from_f64(1e-45), UnitRanged::from_raw(0));
+        assert_eq!(UnitRanged::from_f64(0.5), UnitRanged::from_raw(u32::MAX / 2 + 1));
+        assert_eq!(UnitRanged::from_f64(f64::NAN), UnitRanged::MIN);
     }
 
     #[test]
@@ -299,5 +352,16 @@ mod tests {
         assert_ne!(UnitRanged::from_f64(0.4).to_f64(), 0.4);
 
         assert!((UnitRanged::from_f64(0.4).to_f64() - 0.4).abs() < UnitRanged::F64_EPSILON);
+    }
+
+    #[test]
+    fn mult_test() {
+        let zero = UnitRanged::MIN;
+        let one = UnitRanged::MAX;
+
+        assert_eq!(zero * UnitRanged::from_f32(0.67), zero);
+        assert_eq!(one * UnitRanged::from_f32(0.44), UnitRanged::from_f32(0.44));
+        assert_eq!(one * one, one);
+        assert_eq!(UnitRanged::from_f32(0.1) * UnitRanged::from_f32(0.2), UnitRanged::from_f32(0.02));
     }
 }
