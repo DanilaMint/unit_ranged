@@ -1,6 +1,7 @@
 use core::{
     ops::{Mul, MulAssign},
-    fmt::{Debug, Display}
+    fmt::{Debug, Display},
+    cmp::{Ord, PartialOrd, Ordering}
 };
 
 #[repr(transparent)]
@@ -172,6 +173,55 @@ impl MulAssign for UnitRanged {
     }
 }
 
+impl PartialOrd for UnitRanged {
+    #[inline(always)]
+    fn ge(&self, other: &Self) -> bool {
+        self.0 >= other.0
+    }
+
+    #[inline(always)]
+    fn gt(&self, other: &Self) -> bool {
+        self.0 > other.0
+    }
+
+    #[inline(always)]
+    fn le(&self, other: &Self) -> bool {
+        self.0 <= other.0
+    }
+
+    #[inline(always)]
+    fn lt(&self, other: &Self) -> bool {
+        self.0 < other.0
+    }
+
+    #[inline(always)]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
+}
+
+impl Ord for UnitRanged {
+    #[inline]
+    fn clamp(self, min: Self, max: Self) -> Self {
+        Self(self.0.clamp(min.0, max.0))
+    }
+
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.cmp(&other.0)
+    }
+
+    #[inline]
+    fn max(self, other: Self) -> Self {
+        Self(self.0.max(other.0))
+    }
+
+    #[inline]
+    fn min(self, other: Self) -> Self {
+        Self(self.0.min(other.0))
+    }
+}   
+
 impl Display for UnitRanged {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:9}", self.to_f64())
@@ -195,6 +245,20 @@ impl From<f64> for UnitRanged {
     #[inline(always)]
     fn from(value: f64) -> Self {
         Self::from_f64(value)
+    }
+}
+
+impl From<u32> for UnitRanged {
+    #[inline(always)]
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<UnitRanged> for u32 {
+    #[inline(always)]
+    fn from(value: UnitRanged) -> Self {
+        value.0
     }
 }
 
