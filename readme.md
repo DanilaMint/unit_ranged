@@ -3,11 +3,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![no_std](https://img.shields.io/badge/no__std-compatible-brightgreen.svg)](https://github.com/rust-embedded/wg)
 
-A lightweight, `no_std`-compatible fixed-point type representing values in the range `[0, 1]` using 32-bit precision.
+A lightweight, `no_std`-compatible fixed-point type representing values in the range `[0, 1)` using 32-bit precision.
+
+ The code is formatted according to the [M-RUST](https://github.com/DanilaMint/formating/blob/main/rust.md) standard.
 
 ## Overview
 
-`UnitRanged` is a compact fixed-point type that maps the interval `[0, 1]` onto the full range of `u32`. This provides:
+`UnitRanged` is a compact fixed-point type that maps the interval `[0, 1)` onto the full range of `u32`. This provides:
 
 - **32-bit precision**: Step size of `1/2^32 ≈ 2.33e-10`
 - **`no_std` compatible**: Works without the standard library

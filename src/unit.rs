@@ -1,6 +1,8 @@
+// (M-RUST)
+
 use core::{
     ops::{Mul, MulAssign},
-    fmt::{Debug, Display},
+    fmt::{self, Debug, Display},
     cmp::{Ord, PartialOrd, Ordering}
 };
 
@@ -55,7 +57,7 @@ impl UnitRanged {
 
         let result = normalized >> shift;
 
-        Self(result)
+        return Self(result);
     }
 
     /// Makes `UnitRanged` from `f64`
@@ -81,7 +83,7 @@ impl UnitRanged {
 
         let result = normalized >> shift;
 
-        Self(result)
+        return Self(result)
     }
 
     /// Makes `f32` from `UnitRanged`
@@ -223,13 +225,13 @@ impl Ord for UnitRanged {
 }   
 
 impl Display for UnitRanged {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:9}", self.to_f64())
     }
 }
 
 impl Debug for UnitRanged {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "UnitRanged(0x{:x})", self.0)
     }
 }
