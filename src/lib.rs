@@ -4,4 +4,7 @@
 
 mod unit;
 
+#[cfg(test)]
+mod tests;
+
 pub use unit::UnitRanged;

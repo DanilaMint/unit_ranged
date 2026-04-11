@@ -3,13 +3,12 @@
 use num_traits::{
     Bounded, FromPrimitive, ToPrimitive,
     FromBytes, ToBytes, 
-    CheckedAdd, CheckedSub, CheckedMul, CheckedDiv, CheckedRem, CheckedEuclid,
+    CheckedAdd, CheckedSub, CheckedMul, CheckedDiv, CheckedRem,
     WrappingAdd, WrappingSub, WrappingMul,
-    SaturatingAdd, SaturatingMul, SaturatingSub,
-    Unsigned, Num
+    SaturatingAdd, SaturatingMul, SaturatingSub
 };
 use core::{
-    ops::{Mul, MulAssign},
+    ops::{Add, Sub, Mul, Div, Rem,},
     fmt::{self, Debug, Display},
     cmp::{Ord, PartialOrd, Ordering}
 };
@@ -28,7 +27,7 @@ impl UnitRanged {
     /// Minimal value diffirence in `f64`
     pub const F64_EPSILON : f64 = 1.0 / 4294967296.0;
     /// Minimal value diffirence in `f32`
-    pub const F32_EPSILON : f32 = 2.3283064365386963e-10;
+    pub const F32_EPSILON : f32 = 2.32830643e-10;
     /// Minimal value diffirence
     pub const EPSILON : Self = Self(1);
 
@@ -48,13 +47,23 @@ impl UnitRanged {
     /// - `NaN` value is used as `0`
     #[inline]
     pub const fn from_f32_clamped(x: f32) -> Self {
-        if x < Self::F32_EPSILON || x.is_nan() {
+        let bits = x.to_bits();
+
+        // Check for NaN, negative, or too small values in one go
+        // NaN: exponent = 0xFF AND mantissa != 0
+        // Negative: sign bit = 1
+        // Too small: value < F32_EPSILON
+        let is_nan = (bits & 0x7FFFFFFF) > 0x7F800000;
+        let is_negative = (bits & 0x80000000) != 0;
+        let is_too_small = x < Self::F32_EPSILON;
+
+        if is_nan || is_negative || is_too_small {
             return Self::MIN;
-        } else if x >= 1.0 {
-            return Self::MAX;
         }
 
-        let bits = x.to_bits();
+        if x >= 1.0 {
+            return Self::MAX;
+        }
 
         let exp = (bits >> 23) & 0xff;
         let mantissa = bits & 0x007fffff;
@@ -65,7 +74,7 @@ impl UnitRanged {
 
         let result = normalized >> shift;
 
-        return Self(result);
+        Self(result)
     }
 
     /// Makes `UnitRanged` from `f64`
@@ -74,14 +83,24 @@ impl UnitRanged {
     /// - `NaN` value is used as `0`
     #[inline]
     pub const fn from_f64_clamped(x: f64) -> Self {
-        if x < Self::F64_EPSILON || x.is_nan() {
+        let bits = x.to_bits();
+
+        // Check for NaN, negative, or too small values in one go
+        // NaN: exponent = 0x7FF AND mantissa != 0
+        // Negative: sign bit = 1
+        // Too small: value < F64_EPSILON
+        let is_nan = (bits & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000;
+        let is_negative = (bits & 0x8000000000000000) != 0;
+        let is_too_small = x < Self::F64_EPSILON;
+
+        if is_nan || is_negative || is_too_small {
             return Self::MIN
-        } else if x >= 1.0 {
+        }
+
+        if x >= 1.0 {
             return Self::MAX
         }
 
-        let bits = x.to_bits();
-        
         let exp = (bits >> 52) & 0x7ff;
         let mantissa = bits & 0x000fffffffffffff;
 
@@ -91,7 +110,7 @@ impl UnitRanged {
 
         let result = normalized >> shift;
 
-        return Self(result)
+        Self(result)
     }
 
     #[inline]
@@ -106,7 +125,7 @@ impl UnitRanged {
 
         let result = normalized >> shift;
 
-        return Self(result);
+        Self(result)
     }
 
     #[inline]
@@ -121,7 +140,7 @@ impl UnitRanged {
 
         let result = normalized >> shift;
 
-        return Self(result)
+        Self(result)
     }
 
     /// Makes `f32` from `UnitRanged`
@@ -180,38 +199,10 @@ impl UnitRanged {
         let a = self.0 as u64;
         let b = other.0 as u64;
         let product = a * b;
-        let max_product_normalize = ((a == u32::MAX as u64) & (b == u32::MAX as u64)) as u64;
-        let x = ((product + (1 << 31)) >> 32) + max_product_normalize;
+
+        let x = (product >> 32) as u32;
         
-        Self(x as u32)
-    }
-
-    #[inline]
-    pub const fn saturating_add(self, other: Self) -> Self {
-        Self(self.0.saturating_add(other.0))
-    }
-
-    #[inline]
-    pub const fn wrapping_add(self, other: Self) -> Self {
-        Self(self.0.wrapping_add(other.0))
-    }
-
-
-}
-
-impl Mul for UnitRanged {
-    type Output = Self;
-
-    /// Redirect to `UnitRanged::_mul(ohter)`
-    #[inline]
-    fn mul(self, rhs: Self) -> Self::Output {
-        self._mul(rhs)
-    }
-}
-
-impl MulAssign for UnitRanged {
-    fn mul_assign(&mut self, rhs: Self) {
-        *self = self._mul(rhs);
+        Self(x)
     }
 }
 
@@ -253,12 +244,12 @@ impl Ord for UnitRanged {
         self.0.cmp(&other.0)
     }
 
-    #[inline]
+    #[inline(always)]
     fn max(self, other: Self) -> Self {
         Self(self.0.max(other.0))
     }
 
-    #[inline]
+    #[inline(always)]
     fn min(self, other: Self) -> Self {
         Self(self.0.min(other.0))
     }
@@ -318,6 +309,54 @@ impl From<UnitRanged> for f64 {
     }
 }
 
+impl Add for UnitRanged {
+    type Output = Self;
+
+    #[inline(always)]
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0 + rhs.0)
+    }
+}
+
+impl Sub for UnitRanged {
+    type Output = Self;
+
+    #[inline(always)]
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self(self.0 - rhs.0)
+    }
+}
+
+impl Mul for UnitRanged {
+    type Output = Self;
+
+    /// Redirect to `UnitRanged::_mul(ohter)`
+    #[inline]
+    fn mul(self, rhs: Self) -> Self::Output {
+        self._mul(rhs)
+    }
+}
+
+impl Div for UnitRanged {
+    type Output = Self;
+
+    #[inline]
+    fn div(self, rhs: Self) -> Self::Output {
+        let div = (self.0 as u64) << 32;
+        Self((div / rhs.0 as u64) as u32)
+    }
+}
+
+impl Rem for UnitRanged {
+    type Output = Self;
+
+    #[inline]
+    fn rem(self, rhs: Self) -> Self::Output {
+        let div = (self.0 as u64) << 32;
+        Self((div % rhs.0 as u64) as u32)
+    }
+}
+
 /*** num_traits ***/
 
 impl Bounded for UnitRanged {
@@ -331,17 +370,17 @@ impl Bounded for UnitRanged {
 impl FromBytes for UnitRanged {
     type Bytes = [u8; 4];
 
-    #[inline]
+    #[inline(always)]
     fn from_be_bytes(bytes: &Self::Bytes) -> Self {
         Self(u32::from_be_bytes(*bytes))
     }
 
-    #[inline]
+    #[inline(always)]
     fn from_le_bytes(bytes: &Self::Bytes) -> Self {
         Self(u32::from_le_bytes(*bytes))
     }
 
-    #[inline]
+    #[inline(always)]
     fn from_ne_bytes(bytes: &Self::Bytes) -> Self {
         Self(u32::from_ne_bytes(*bytes))
     }
@@ -350,25 +389,33 @@ impl FromBytes for UnitRanged {
 impl ToBytes for UnitRanged {
     type Bytes = [u8; 4];
 
-    #[inline]
+    #[inline(always)]
     fn to_be_bytes(&self) -> Self::Bytes {
         self.0.to_be_bytes()
     }
 
-    #[inline]
+    #[inline(always)]
     fn to_le_bytes(&self) -> Self::Bytes {
         self.0.to_le_bytes()
     }
 
-    #[inline]
+    #[inline(always)]
     fn to_ne_bytes(&self) -> Self::Bytes {
         self.0.to_ne_bytes()
     }
 }
 
 impl FromPrimitive for UnitRanged {
+    #[inline]
     fn from_f32(n: f32) -> Option<Self> {
-        if n.is_nan() || n < 0. || n > 1. {
+        let bits = n.to_bits();
+
+        // Check for NaN, negative, or out of range in one go
+        let is_nan = (bits & 0x7FFFFFFF) > 0x7F800000;
+        let is_negative = (bits & 0x80000000) != 0;
+        let is_out_of_range = n > 1.;
+
+        if is_nan || is_negative || is_out_of_range {
             None
         } else if n < Self::F32_EPSILON {
             Some(Self::MIN)
@@ -379,8 +426,16 @@ impl FromPrimitive for UnitRanged {
         }
     }
 
+    #[inline]
     fn from_f64(n: f64) -> Option<Self> {
-        if n.is_nan() || n < 0. || n > 1. {
+        let bits = n.to_bits();
+
+        // Check for NaN, negative, or out of range in one go
+        let is_nan = (bits & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000;
+        let is_negative = (bits & 0x8000000000000000) != 0;
+        let is_out_of_range = n > 1.;
+
+        if is_nan || is_negative || is_out_of_range {
             None
         } else if n < Self::F64_EPSILON {
             Some(Self::MIN)
@@ -391,6 +446,7 @@ impl FromPrimitive for UnitRanged {
         }
     }
 
+    #[inline(always)]
     fn from_i128(n: i128) -> Option<Self> {
         match n {
             0 => Some(Self::MIN),
@@ -399,6 +455,7 @@ impl FromPrimitive for UnitRanged {
         }
     }
 
+    #[inline(always)]
     fn from_i16(n: i16) -> Option<Self> {
         match n {
             0 => Some(Self::MIN),
@@ -407,6 +464,7 @@ impl FromPrimitive for UnitRanged {
         }
     }
 
+    #[inline(always)]
     fn from_i32(n: i32) -> Option<Self> {
         match n {
             0 => Some(Self::MIN),
@@ -415,6 +473,7 @@ impl FromPrimitive for UnitRanged {
         }
     }
 
+    #[inline(always)]
     fn from_i64(n: i64) -> Option<Self> {
         match n {
             0 => Some(Self::MIN),
@@ -423,6 +482,7 @@ impl FromPrimitive for UnitRanged {
         }
     }
 
+    #[inline(always)]
     fn from_i8(n: i8) -> Option<Self> {
         match n {
             0 => Some(Self::MIN),
@@ -431,6 +491,7 @@ impl FromPrimitive for UnitRanged {
         }
     }
 
+    #[inline(always)]
     fn from_isize(n: isize) -> Option<Self> {
         match n {
             0 => Some(Self::MIN),
@@ -439,6 +500,7 @@ impl FromPrimitive for UnitRanged {
         }
     }
 
+    #[inline(always)]
     fn from_u128(n: u128) -> Option<Self> {
         match n {
             0 => Some(Self::MIN),
@@ -447,6 +509,7 @@ impl FromPrimitive for UnitRanged {
         }
     }
 
+    #[inline(always)]
     fn from_u16(n: u16) -> Option<Self> {
         match n {
             0 => Some(Self::MIN),
@@ -455,6 +518,7 @@ impl FromPrimitive for UnitRanged {
         }
     }
 
+    #[inline(always)]
     fn from_u32(n: u32) -> Option<Self> {
         match n {
             0 => Some(Self::MIN),
@@ -462,7 +526,8 @@ impl FromPrimitive for UnitRanged {
             _ => None
         }
     }
-    
+
+    #[inline(always)]
     fn from_u64(n: u64) -> Option<Self> {
         match n {
             0 => Some(Self::MIN),
@@ -471,6 +536,7 @@ impl FromPrimitive for UnitRanged {
         }
     }
 
+    #[inline(always)]
     fn from_u8(n: u8) -> Option<Self> {
         match n {
             0 => Some(Self::MIN),
@@ -479,6 +545,7 @@ impl FromPrimitive for UnitRanged {
         }
     }
 
+    #[inline(always)]
     fn from_usize(n: usize) -> Option<Self> {
         match n {
             0 => Some(Self::MIN),
@@ -498,182 +565,113 @@ impl ToPrimitive for UnitRanged {
     #[inline]
     fn to_i128(&self) -> Option<i128> { Some((self.0 == u32::MAX).into()) }
 
+    #[inline(always)]
     fn to_i16(&self) -> Option<i16> { Some((self.0 == u32::MAX).into()) }
 
+    #[inline(always)]
     fn to_i32(&self) -> Option<i32> { Some((self.0 == u32::MAX).into()) }
 
+    #[inline(always)]
     fn to_i64(&self) -> Option<i64> { Some((self.0 == u32::MAX).into()) }
 
+    #[inline(always)]
     fn to_i8(&self) -> Option<i8> { Some((self.0 == u32::MAX).into()) }
 
+    #[inline(always)]
     fn to_isize(&self) -> Option<isize> { Some((self.0 == u32::MAX).into()) }
 
+    #[inline(always)]
     fn to_u128(&self) -> Option<u128> { Some((self.0 == u32::MAX).into()) }
 
+    #[inline(always)]
     fn to_u16(&self) -> Option<u16> { Some((self.0 == u32::MAX).into()) }
 
+    #[inline(always)]
     fn to_u32(&self) -> Option<u32> { Some((self.0 == u32::MAX).into()) }
 
+    #[inline(always)]
     fn to_u64(&self) -> Option<u64> { Some((self.0 == u32::MAX).into()) }
 
+    #[inline(always)]
     fn to_u8(&self) -> Option<u8> { Some((self.0 == u32::MAX).into()) }
 
+    #[inline(always)]
     fn to_usize(&self) -> Option<usize> { Some((self.0 == u32::MAX).into()) }
 }
 
-/* 
-#[cfg(test)]
-mod tests {
-    use std::time::Instant;
-    use std::hint::black_box;
-    use super::*;
-
-    #[test]
-    fn from_f32_test() {
-        assert_eq!(UnitRanged::from_f32(0.0), UnitRanged::from_raw(0));
-        assert_eq!(UnitRanged::from_f32(1.0), UnitRanged::from_raw(u32::MAX));
-        assert_eq!(UnitRanged::from_f32(144.4), UnitRanged::from_raw(u32::MAX));
-        assert_eq!(UnitRanged::from_f32(1e-45), UnitRanged::from_raw(0));
-        assert_eq!(UnitRanged::from_f32(0.5), UnitRanged::from_raw(u32::MAX / 2 + 1));
-        assert_eq!(UnitRanged::from_f32(f32::NAN), UnitRanged::MIN);
-    }
-
-    #[test]
-    fn test_from_f32_speed() {
-        fn from_f32_mul(x : f32) -> UnitRanged {
-            const U32_MAX : f32 = u32::MAX as f32;
-            let x = x.clamp(0.0, 1.0);
-            return UnitRanged::from_raw((x * U32_MAX) as u32);
-        }
-
-        const ITERATIONS: u32 = 10_000_000;
-        
-        let mut results = String::new();
-        results.push_str("\n=== F32 CONVERSION BENCHMARK ===\n\n");
-        
-        // Тестовые значения
-        let values = [0.0f32, 0.1, 0.5, 0.999, 1.0, 1.3, 0e-45, -4.1];
-        
-        for &x in &values {
-            results.push_str(&format!("Value: {}\n", x));
-            results.push_str(&format!("{}\n", "-".repeat(50)));
-            
-            // Твой метод
-            let start = Instant::now();
-            for _ in 0..ITERATIONS {
-                black_box(UnitRanged::from_f32(black_box(x)));
-            }
-            let dur1 = start.elapsed();
-            let ns1 = dur1.as_nanos() as f64 / ITERATIONS as f64;
-            
-            // Метод с умножением
-            let start = Instant::now();
-            for _ in 0..ITERATIONS {
-                black_box(from_f32_mul(black_box(x)));
-            }
-            let dur2 = start.elapsed();
-            let ns2 = dur2.as_nanos() as f64 / ITERATIONS as f64;
-            
-            results.push_str(&format!("  Bit shift:  {:>8?} total, {:>6.2} ns/op\n", dur1, ns1));
-            results.push_str(&format!("  Mul:        {:>8?} total, {:>6.2} ns/op\n", dur2, ns2));
-            results.push_str(&format!("  Speedup:    {:.2}x\n\n", ns2 / ns1));
-        }
-        results.push_str("\n================================\n");
-        
-        // Выводим всё сразу
-        print!("{}", results);
-        
-        // Чтобы тест не проходил как успешный? Нет, пусть проходит
-        assert!(true);
-    }
-
-    #[test]
-    fn from_f64_test() {
-        assert_eq!(UnitRanged::from_f64(0.0), UnitRanged::from_raw(0));
-        assert_eq!(UnitRanged::from_f64(1.0), UnitRanged::from_raw(u32::MAX));
-        assert_eq!(UnitRanged::from_f64(144.4), UnitRanged::from_raw(u32::MAX));
-        assert_eq!(UnitRanged::from_f64(1e-45), UnitRanged::from_raw(0));
-        assert_eq!(UnitRanged::from_f64(0.5), UnitRanged::from_raw(u32::MAX / 2 + 1));
-        assert_eq!(UnitRanged::from_f64(f64::NAN), UnitRanged::MIN);
-    }
-
-    #[test]
-    fn test_from_f64_speed() {
-        fn from_f64_mul(x : f64) -> UnitRanged {
-            const U32_MAX : f64 = u32::MAX as f64;
-            let x = x.clamp(0.0, 1.0);
-            return UnitRanged::from_raw((x * U32_MAX) as u32);
-        }
-
-        const ITERATIONS: u32 = 10_000_000;
-        
-        let mut results = String::new();
-        results.push_str("\n=== F32 CONVERSION BENCHMARK ===\n\n");
-        
-        // Тестовые значения
-        let values = [0.0f64, 0.1, 0.5, 0.999, 1.0, 1.3, 0e-45, -4.1];
-        
-        for &x in &values {
-            results.push_str(&format!("Value: {}\n", x));
-            results.push_str(&format!("{}\n", "-".repeat(50)));
-            
-            // Твой метод
-            let start = Instant::now();
-            for _ in 0..ITERATIONS {
-                black_box(UnitRanged::from_f64(black_box(x)));
-            }
-            let dur1 = start.elapsed();
-            let ns1 = dur1.as_nanos() as f64 / ITERATIONS as f64;
-            
-            // Метод с умножением
-            let start = Instant::now();
-            for _ in 0..ITERATIONS {
-                black_box(from_f64_mul(black_box(x)));
-            }
-            let dur2 = start.elapsed();
-            let ns2 = dur2.as_nanos() as f64 / ITERATIONS as f64;
-            
-            results.push_str(&format!("  Bit shift:  {:>8?} total, {:>6.2} ns/op\n", dur1, ns1));
-            results.push_str(&format!("  Mul:        {:>8?} total, {:>6.2} ns/op\n", dur2, ns2));
-            results.push_str(&format!("  Speedup:    {:.2}x\n\n", ns2 / ns1));
-        }
-        results.push_str("\n================================\n");
-        
-        // Выводим всё сразу
-        print!("{}", results);
-        
-        // Чтобы тест не проходил как успешный? Нет, пусть проходит
-        assert!(true);
-    }
-
-    #[test]
-    fn to_f32_test() {
-        assert_eq!(UnitRanged::MIN.to_f32(), 0.0);
-        assert_eq!(UnitRanged::HALF.to_f32(), 0.5);
-        assert_eq!(UnitRanged::from_f32(0.4).to_f32(), 0.4);
-    }
-
-    #[test]
-    fn to_f64_test() {
-        assert_eq!(UnitRanged::MIN.to_f64(), 0.0);
-        assert_eq!(UnitRanged::HALF.to_f64(), 0.5);
-        
-        // Error is smaller than epsilon of `UnitRanged`
-        assert_ne!(UnitRanged::from_f64(0.4).to_f64(), 0.4);
-
-        assert!((UnitRanged::from_f64(0.4).to_f64() - 0.4).abs() < UnitRanged::F64_EPSILON);
-    }
-
-    #[test]
-    fn mult_test() {
-        let zero = UnitRanged::MIN;
-        let one = UnitRanged::MAX;
-
-        assert_eq!(zero * UnitRanged::from_f32(0.67), zero);
-        assert_eq!(one * UnitRanged::from_f32(0.44), UnitRanged::from_f32(0.44));
-        assert_eq!(one * one, one);
-        assert_eq!(UnitRanged::from_f32(0.1) * UnitRanged::from_f32(0.2), UnitRanged::from_f32(0.02));
+impl CheckedAdd for UnitRanged {
+    #[inline]
+    fn checked_add(&self, v: &Self) -> Option<Self> {
+        self.0.checked_add(v.0).map(|x| Self(x))
     }
 }
 
-*/
+impl CheckedSub for UnitRanged {
+    #[inline]
+    fn checked_sub(&self, v: &Self) -> Option<Self> {
+        self.0.checked_sub(v.0).map(|x| Self(x))
+    }
+}
+
+impl CheckedMul for UnitRanged {
+    #[inline]
+    fn checked_mul(&self, v: &Self) -> Option<Self> {
+        self.0.checked_mul(v.0).map(|x| Self(x))
+    }
+}
+
+impl CheckedDiv for UnitRanged {
+    #[inline]
+    fn checked_div(&self, v: &Self) -> Option<Self> {
+        self.0.checked_div(v.0).map(|x| Self(x))
+    }
+}
+
+impl CheckedRem for UnitRanged {
+    #[inline]
+    fn checked_rem(&self, v: &Self) -> Option<Self> {
+        self.0.checked_rem(v.0).map(|x| Self(x))
+    }
+}
+
+impl WrappingAdd for UnitRanged {
+    #[inline(always)]
+    fn wrapping_add(&self, v: &Self) -> Self {
+        Self(self.0.wrapping_add(v.0))
+    }
+}
+
+impl WrappingSub for UnitRanged {
+    #[inline(always)]
+    fn wrapping_sub(&self, v: &Self) -> Self {
+        Self(self.0.wrapping_sub(v.0))
+    }
+}
+
+impl WrappingMul for UnitRanged {
+    #[inline]
+    fn wrapping_mul(&self, v: &Self) -> Self {
+        self._mul(*v)
+    }
+}
+
+impl SaturatingAdd for UnitRanged {
+    #[inline(always)]
+    fn saturating_add(&self, v: &Self) -> Self {
+        Self(self.0.saturating_add(v.0))
+    }
+}
+
+impl SaturatingSub for UnitRanged {
+    #[inline(always)]
+    fn saturating_sub(&self, v: &Self) -> Self {
+        Self(self.0.saturating_sub(v.0))
+    }
+}
+
+impl SaturatingMul for UnitRanged {
+    #[inline]
+    fn saturating_mul(&self, v: &Self) -> Self {
+        self._mul(*v)
+    }
+}
