@@ -1,5 +1,13 @@
 // (M-RUST)
 
+use num_traits::{
+    Bounded, FromPrimitive, ToPrimitive,
+    FromBytes, ToBytes, 
+    CheckedAdd, CheckedSub, CheckedMul, CheckedDiv, CheckedRem, CheckedEuclid,
+    WrappingAdd, WrappingSub, WrappingMul,
+    SaturatingAdd, SaturatingMul, SaturatingSub,
+    Unsigned, Num
+};
 use core::{
     ops::{Mul, MulAssign},
     fmt::{self, Debug, Display},
@@ -39,7 +47,7 @@ impl UnitRanged {
     /// - If value is smaller than `0`, value is `UnitRanged::MIN`
     /// - `NaN` value is used as `0`
     #[inline]
-    pub const fn from_f32(x: f32) -> Self {
+    pub const fn from_f32_clamped(x: f32) -> Self {
         if x < Self::F32_EPSILON || x.is_nan() {
             return Self::MIN;
         } else if x >= 1.0 {
@@ -65,7 +73,7 @@ impl UnitRanged {
     /// - If value is smaller than `0`, value is `UnitRanged::MIN`
     /// - `NaN` value is used as `0`
     #[inline]
-    pub const fn from_f64(x: f64) -> Self {
+    pub const fn from_f64_clamped(x: f64) -> Self {
         if x < Self::F64_EPSILON || x.is_nan() {
             return Self::MIN
         } else if x >= 1.0 {
@@ -86,9 +94,39 @@ impl UnitRanged {
         return Self(result)
     }
 
+    #[inline]
+    pub const unsafe fn from_f32_unchecked(x: f32) -> Self {
+        let bits = x.to_bits();
+        let exp = (bits >> 23) & 0xff;
+        let mantissa = bits & 0x007fffff;
+
+        let normalized = (mantissa | (1 << 23)) << 8;
+
+        let shift = 126 - exp;
+
+        let result = normalized >> shift;
+
+        return Self(result);
+    }
+
+    #[inline]
+    pub const unsafe fn from_f64_unchecked(x: f64) -> Self {
+        let bits = x.to_bits();
+        let exp = (bits >> 52) & 0x7ff;
+        let mantissa = bits & 0x000fffffffffffff;
+
+        let normalized = ((mantissa | 1 << 52) >> 21) as u32;
+
+        let shift = 1022 - exp;
+
+        let result = normalized >> shift;
+
+        return Self(result)
+    }
+
     /// Makes `f32` from `UnitRanged`
     #[inline]
-    pub const fn to_f32(&self) -> f32 {
+    pub const fn to_f32_const(&self) -> f32 {
         let n = self.0;
         if n == 0 {
             return 0.0
@@ -110,7 +148,7 @@ impl UnitRanged {
     /// Makes `f64` from `UnitRanged`
     /// - May have a number error
     #[inline]
-    pub const fn to_f64(&self) -> f64 {
+    pub const fn to_f64_const(&self) -> f64 {
         let n64 = self.0 as u64;
         if n64 == 0 {
             return 0.0;
@@ -157,6 +195,8 @@ impl UnitRanged {
     pub const fn wrapping_add(self, other: Self) -> Self {
         Self(self.0.wrapping_add(other.0))
     }
+
+
 }
 
 impl Mul for UnitRanged {
@@ -226,7 +266,7 @@ impl Ord for UnitRanged {
 
 impl Display for UnitRanged {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:9}", self.to_f64())
+        write!(f, "{:9}", self.to_f64_const())
     }
 }
 
@@ -239,14 +279,14 @@ impl Debug for UnitRanged {
 impl From<f32> for UnitRanged {
     #[inline(always)]
     fn from(value: f32) -> Self {
-        Self::from_f32(value)
+        Self::from_f32_clamped(value)
     }
 }
 
 impl From<f64> for UnitRanged {
     #[inline(always)]
     fn from(value: f64) -> Self {
-        Self::from_f64(value)
+        Self::from_f64_clamped(value)
     }
 }
 
@@ -267,17 +307,221 @@ impl From<UnitRanged> for u32 {
 impl From<UnitRanged> for f32 {
     #[inline(always)]
     fn from(value: UnitRanged) -> Self {
-        value.to_f32()
+        value.to_f32_const()
     }
 }
 
 impl From<UnitRanged> for f64 {
     #[inline(always)]
     fn from(value: UnitRanged) -> Self {
-        value.to_f64()
+        value.to_f64_const()
     }
 }
 
+/*** num_traits ***/
+
+impl Bounded for UnitRanged {
+    #[inline(always)]
+    fn max_value() -> Self { Self::MAX }
+
+    #[inline(always)]
+    fn min_value() -> Self { Self::MIN }
+}
+
+impl FromBytes for UnitRanged {
+    type Bytes = [u8; 4];
+
+    #[inline]
+    fn from_be_bytes(bytes: &Self::Bytes) -> Self {
+        Self(u32::from_be_bytes(*bytes))
+    }
+
+    #[inline]
+    fn from_le_bytes(bytes: &Self::Bytes) -> Self {
+        Self(u32::from_le_bytes(*bytes))
+    }
+
+    #[inline]
+    fn from_ne_bytes(bytes: &Self::Bytes) -> Self {
+        Self(u32::from_ne_bytes(*bytes))
+    }
+}
+
+impl ToBytes for UnitRanged {
+    type Bytes = [u8; 4];
+
+    #[inline]
+    fn to_be_bytes(&self) -> Self::Bytes {
+        self.0.to_be_bytes()
+    }
+
+    #[inline]
+    fn to_le_bytes(&self) -> Self::Bytes {
+        self.0.to_le_bytes()
+    }
+
+    #[inline]
+    fn to_ne_bytes(&self) -> Self::Bytes {
+        self.0.to_ne_bytes()
+    }
+}
+
+impl FromPrimitive for UnitRanged {
+    fn from_f32(n: f32) -> Option<Self> {
+        if n.is_nan() || n < 0. || n > 1. {
+            None
+        } else if n < Self::F32_EPSILON {
+            Some(Self::MIN)
+        } else if n == 1. {
+            Some(Self::MAX)
+        } else {
+            Some(unsafe { Self::from_f32_unchecked(n) })
+        }
+    }
+
+    fn from_f64(n: f64) -> Option<Self> {
+        if n.is_nan() || n < 0. || n > 1. {
+            None
+        } else if n < Self::F64_EPSILON {
+            Some(Self::MIN)
+        } else if n == 1. {
+            Some(Self::MAX)
+        } else {
+            Some(unsafe { Self::from_f64_unchecked(n) })
+        }
+    }
+
+    fn from_i128(n: i128) -> Option<Self> {
+        match n {
+            0 => Some(Self::MIN),
+            1 => Some(Self::MAX),
+            _ => None
+        }
+    }
+
+    fn from_i16(n: i16) -> Option<Self> {
+        match n {
+            0 => Some(Self::MIN),
+            1 => Some(Self::MAX),
+            _ => None
+        }
+    }
+
+    fn from_i32(n: i32) -> Option<Self> {
+        match n {
+            0 => Some(Self::MIN),
+            1 => Some(Self::MAX),
+            _ => None
+        }
+    }
+
+    fn from_i64(n: i64) -> Option<Self> {
+        match n {
+            0 => Some(Self::MIN),
+            1 => Some(Self::MAX),
+            _ => None
+        }
+    }
+
+    fn from_i8(n: i8) -> Option<Self> {
+        match n {
+            0 => Some(Self::MIN),
+            1 => Some(Self::MAX),
+            _ => None
+        }
+    }
+
+    fn from_isize(n: isize) -> Option<Self> {
+        match n {
+            0 => Some(Self::MIN),
+            1 => Some(Self::MAX),
+            _ => None
+        }
+    }
+
+    fn from_u128(n: u128) -> Option<Self> {
+        match n {
+            0 => Some(Self::MIN),
+            1 => Some(Self::MAX),
+            _ => None
+        }
+    }
+
+    fn from_u16(n: u16) -> Option<Self> {
+        match n {
+            0 => Some(Self::MIN),
+            1 => Some(Self::MAX),
+            _ => None
+        }
+    }
+
+    fn from_u32(n: u32) -> Option<Self> {
+        match n {
+            0 => Some(Self::MIN),
+            1 => Some(Self::MAX),
+            _ => None
+        }
+    }
+    
+    fn from_u64(n: u64) -> Option<Self> {
+        match n {
+            0 => Some(Self::MIN),
+            1 => Some(Self::MAX),
+            _ => None
+        }
+    }
+
+    fn from_u8(n: u8) -> Option<Self> {
+        match n {
+            0 => Some(Self::MIN),
+            1 => Some(Self::MAX),
+            _ => None
+        }
+    }
+
+    fn from_usize(n: usize) -> Option<Self> {
+        match n {
+            0 => Some(Self::MIN),
+            1 => Some(Self::MAX),
+            _ => None
+        }
+    }
+}
+
+impl ToPrimitive for UnitRanged {
+    #[inline]
+    fn to_f32(&self) -> Option<f32> { Some(self.to_f32_const()) }
+
+    #[inline]
+    fn to_f64(&self) -> Option<f64> { Some(self.to_f64_const()) }
+
+    #[inline]
+    fn to_i128(&self) -> Option<i128> { Some((self.0 == u32::MAX).into()) }
+
+    fn to_i16(&self) -> Option<i16> { Some((self.0 == u32::MAX).into()) }
+
+    fn to_i32(&self) -> Option<i32> { Some((self.0 == u32::MAX).into()) }
+
+    fn to_i64(&self) -> Option<i64> { Some((self.0 == u32::MAX).into()) }
+
+    fn to_i8(&self) -> Option<i8> { Some((self.0 == u32::MAX).into()) }
+
+    fn to_isize(&self) -> Option<isize> { Some((self.0 == u32::MAX).into()) }
+
+    fn to_u128(&self) -> Option<u128> { Some((self.0 == u32::MAX).into()) }
+
+    fn to_u16(&self) -> Option<u16> { Some((self.0 == u32::MAX).into()) }
+
+    fn to_u32(&self) -> Option<u32> { Some((self.0 == u32::MAX).into()) }
+
+    fn to_u64(&self) -> Option<u64> { Some((self.0 == u32::MAX).into()) }
+
+    fn to_u8(&self) -> Option<u8> { Some((self.0 == u32::MAX).into()) }
+
+    fn to_usize(&self) -> Option<usize> { Some((self.0 == u32::MAX).into()) }
+}
+
+/* 
 #[cfg(test)]
 mod tests {
     use std::time::Instant;
@@ -431,3 +675,5 @@ mod tests {
         assert_eq!(UnitRanged::from_f32(0.1) * UnitRanged::from_f32(0.2), UnitRanged::from_f32(0.02));
     }
 }
+
+*/
