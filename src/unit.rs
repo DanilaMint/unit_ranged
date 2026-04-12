@@ -25,11 +25,14 @@ impl UnitRanged {
     /// A half `0.5`
     pub const HALF : Self = Self(1 << 31);
     /// Minimal value diffirence in `f64`
-    pub const F64_EPSILON : f64 = 1.0 / 4294967296.0;
+    pub const F64_EPSILON : f64 = 1.0 / 4294967296.;
     /// Minimal value diffirence in `f32`
     pub const F32_EPSILON : f32 = 2.32830643e-10;
     /// Minimal value diffirence
     pub const EPSILON : Self = Self(1);
+    
+    const TWO_POWER_32_F32: f32 = 4294967296.;
+    const TWO_POWER_32_F64: f64 = 4294967296.;
 
     #[inline(always)]
     pub const fn from_raw(x: u32) -> Self {
@@ -42,11 +45,12 @@ impl UnitRanged {
     }
 
     /// Makes `UnitRanged` from `f32`
-    /// - If value is bigger than `1`, value is `UnitRanged::MAX`
-    /// - If value is smaller than `0`, value is `UnitRanged::MIN`
-    /// - `NaN` value is used as `0`
+    /// - using bit-operations
+    /// - const
+    /// - clamping value to [0; 1)
+    /// - if x is NaN, it returns 0
     #[inline]
-    pub const fn from_f32_clamped(x: f32) -> Self {
+    pub const fn from_f32_clamped_const(x: f32) -> Self {
         let bits = x.to_bits();
 
         // Check for NaN, negative, or too small values in one go
@@ -65,24 +69,16 @@ impl UnitRanged {
             return Self::MAX;
         }
 
-        let exp = (bits >> 23) & 0xff;
-        let mantissa = bits & 0x007fffff;
-
-        let normalized = (mantissa | (1 << 23)) << 8;
-
-        let shift = 126 - exp;
-
-        let result = normalized >> shift;
-
-        Self(result)
+        unsafe { Self::from_f32_unchecked_const(x) }
     }
 
     /// Makes `UnitRanged` from `f64`
-    /// - If value is bigger than `1`, value is `UnitRanged::MAX`
-    /// - If value is smaller than `0`, value is `UnitRanged::MIN`
-    /// - `NaN` value is used as `0`
+    /// - using bit-operations
+    /// - const
+    /// - clamping value to [0; 1)
+    /// - if x is NaN, it returns 0
     #[inline]
-    pub const fn from_f64_clamped(x: f64) -> Self {
+    pub const fn from_f64_clamped_const(x: f64) -> Self {
         let bits = x.to_bits();
 
         // Check for NaN, negative, or too small values in one go
@@ -101,20 +97,18 @@ impl UnitRanged {
             return Self::MAX
         }
 
-        let exp = (bits >> 52) & 0x7ff;
-        let mantissa = bits & 0x000fffffffffffff;
-
-        let normalized = ((mantissa | 1 << 52) >> 21) as u32;
-
-        let shift = 1022 - exp;
-
-        let result = normalized >> shift;
-
-        Self(result)
+        unsafe { Self::from_f64_unchecked_const(x) }
     }
 
+    /// Makes `UnitRanged` from `f32`
+    /// - using bit-operations
+    /// - const
+    /// 
+    /// # Safety
+    /// - x must be in [0; 1)
+    /// - x must not be NaN
     #[inline]
-    pub const unsafe fn from_f32_unchecked(x: f32) -> Self {
+    pub const unsafe fn from_f32_unchecked_const(x: f32) -> Self {
         let bits = x.to_bits();
         let exp = (bits >> 23) & 0xff;
         let mantissa = bits & 0x007fffff;
@@ -128,8 +122,15 @@ impl UnitRanged {
         Self(result)
     }
 
+    /// Makes `UnitRanged` from `f64`
+    /// - using bit-operations
+    /// - const
+    /// 
+    /// # Safety
+    /// - x must be in [0; 1)
+    /// - x must not be NaN
     #[inline]
-    pub const unsafe fn from_f64_unchecked(x: f64) -> Self {
+    pub const unsafe fn from_f64_unchecked_const(x: f64) -> Self {
         let bits = x.to_bits();
         let exp = (bits >> 52) & 0x7ff;
         let mantissa = bits & 0x000fffffffffffff;
@@ -141,6 +142,52 @@ impl UnitRanged {
         let result = normalized >> shift;
 
         Self(result)
+    }
+
+    /// Makes `UnitRanged` from `f32`
+    /// 
+    /// # Safety
+    /// - x must be in [0; 1)
+    /// - x must not be NaN
+    #[inline]
+    pub unsafe fn from_f32_unchecked(x: f32) -> Self {
+        let prod = x * Self::TWO_POWER_32_F32;
+        Self(unsafe { prod.to_int_unchecked() })
+    }
+
+    /// Makes `UnitRanged` from `f64`
+    /// 
+    /// # Safety
+    /// - x must be in [0; 1)
+    /// - x must not be NaN
+    #[inline]
+    pub unsafe fn from_f64_unchecked(x: f64) -> Self {
+        let prod = x * Self::TWO_POWER_32_F64;
+        Self(unsafe { prod.to_int_unchecked() })
+    }
+
+    /// Makes `UnitRanged` from `f32`
+    /// - clamping x to [0; 1)
+    /// - if x is NaN, returns 0
+    #[inline]
+    pub fn from_f32_clamped(x: f32) -> Self {
+        if x.is_nan() {
+            Self::MIN
+        } else {
+            unsafe { Self::from_f32_unchecked(x.clamp(0., 1.)) }
+        }
+    }
+
+    /// Makes `UnitRanged` from `f32`
+    /// - clamping x to [0; 1)
+    /// - if x is NaN, returns 0
+    #[inline]
+    pub fn from_f64_clamped(x: f64) -> Self {
+        if x.is_nan() {
+            Self::MIN
+        } else {
+            unsafe { Self::from_f64_unchecked(x.clamp(0., 1.)) }
+        }
     }
 
     /// Makes `f32` from `UnitRanged`
@@ -186,13 +233,30 @@ impl UnitRanged {
         f64::from_bits(result)
     }
 
+    #[inline]
+    pub fn to_f32_fpu(&self) -> f32 {
+        let val = self.0 as f32;
+        val * Self::F32_EPSILON
+    }
+    
+    #[inline]
+    pub fn to_f64_fpu(&self) -> f64 {
+        let val = self.0 as f64;
+        val * Self::F64_EPSILON
+    }
+
     /// Multiplicate two `UnitRanged`
-    /// 
+    ///
     /// May be error while mul, there is should use:
     /// ```rust
-    /// a.to_f32() * b.to_f32();
+    /// # use unit_ranged::UnitRanged;
+    /// let a = UnitRanged::from(0.5_f32);
+    /// let b = UnitRanged::from(0.25_f32);
+    /// // For more accurate results:
+    /// let result = a.to_f32_const() * b.to_f32_const();
     /// // or
-    /// a.to_f64() * b.to_f64();
+    /// let result = a.to_f64_const() * b.to_f64_const();
+    /// # let _ = result;
     /// ```
     #[inline]
     pub const fn _mul(self, other: Self) -> Self {
@@ -408,19 +472,12 @@ impl ToBytes for UnitRanged {
 impl FromPrimitive for UnitRanged {
     #[inline]
     fn from_f32(n: f32) -> Option<Self> {
-        let bits = n.to_bits();
-
-        // Check for NaN, negative, or out of range in one go
-        let is_nan = (bits & 0x7FFFFFFF) > 0x7F800000;
-        let is_negative = (bits & 0x80000000) != 0;
-        let is_out_of_range = n > 1.;
-
-        if is_nan || is_negative || is_out_of_range {
+        if n.is_nan() {
             None
-        } else if n < Self::F32_EPSILON {
-            Some(Self::MIN)
-        } else if n == 1. {
-            Some(Self::MAX)
+        } else if n < 0. {
+            None
+        } else if n > 1. {
+            None
         } else {
             Some(unsafe { Self::from_f32_unchecked(n) })
         }
@@ -428,19 +485,12 @@ impl FromPrimitive for UnitRanged {
 
     #[inline]
     fn from_f64(n: f64) -> Option<Self> {
-        let bits = n.to_bits();
-
-        // Check for NaN, negative, or out of range in one go
-        let is_nan = (bits & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000;
-        let is_negative = (bits & 0x8000000000000000) != 0;
-        let is_out_of_range = n > 1.;
-
-        if is_nan || is_negative || is_out_of_range {
+        if n.is_nan() {
             None
-        } else if n < Self::F64_EPSILON {
-            Some(Self::MIN)
-        } else if n == 1. {
-            Some(Self::MAX)
+        } else if n < 0. {
+            None
+        } else if n > 1. {
+            None
         } else {
             Some(unsafe { Self::from_f64_unchecked(n) })
         }
@@ -557,10 +607,10 @@ impl FromPrimitive for UnitRanged {
 
 impl ToPrimitive for UnitRanged {
     #[inline]
-    fn to_f32(&self) -> Option<f32> { Some(self.to_f32_const()) }
+    fn to_f32(&self) -> Option<f32> { Some(self.to_f32_fpu()) }
 
     #[inline]
-    fn to_f64(&self) -> Option<f64> { Some(self.to_f64_const()) }
+    fn to_f64(&self) -> Option<f64> { Some(self.to_f64_fpu()) }
 
     #[inline]
     fn to_i128(&self) -> Option<i128> { Some((self.0 == u32::MAX).into()) }
