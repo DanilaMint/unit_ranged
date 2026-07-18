@@ -769,3 +769,77 @@ fn test_round_trip_conversions() {
                "Round-trip error too large for {}: {}", value, error);
     }
 }
+
+// ============================================================================
+// serde Tests
+// ============================================================================
+
+#[cfg(all(test, feature = "serde"))]
+mod serde_tests {
+    use crate::UnitRanged;
+    use serde_derive::{Deserialize, Serialize};
+
+    #[derive(Serialize, Deserialize, PartialEq, Debug)]
+    struct Sample {
+        a: UnitRanged,
+        b: UnitRanged,
+    }
+
+    #[test]
+    fn roundtrip_json() {
+        let original = Sample {
+            a: UnitRanged::from_f64_clamped_const(0.25),
+            b: UnitRanged::HALF,
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: Sample = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed);
+    }
+
+    #[test]
+    fn roundtrip_f64_preserved() {
+        for &v in &[0.0_f64, 0.25, 0.5, 0.75, 1.0, 0.999999999767] {
+            let original = UnitRanged::from_f64_clamped_const(v);
+            let json = serde_json::to_string(&original).unwrap();
+            let parsed: UnitRanged = serde_json::from_str(&json).unwrap();
+            assert_eq!(
+                original.to_f64_fpu(),
+                parsed.to_f64_fpu(),
+                "f64 round-trip mismatch for input {v}",
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_negative() {
+        let json = "-0.1";
+        let parsed: Result<UnitRanged, _> = serde_json::from_str(json);
+        assert!(parsed.is_err(), "negative value must be rejected");
+    }
+
+    #[test]
+    fn rejects_above_one() {
+        let json = "1.5";
+        let parsed: Result<UnitRanged, _> = serde_json::from_str(json);
+        assert!(parsed.is_err(), "value above 1.0 must be rejected");
+    }
+
+    #[test]
+    fn rejects_nan() {
+        let json = "NaN";
+        let parsed: Result<UnitRanged, _> = serde_json::from_str(json);
+        assert!(parsed.is_err(), "NaN must be rejected");
+    }
+
+    #[test]
+    fn accepts_boundary_zero() {
+        let parsed: UnitRanged = serde_json::from_str("0").unwrap();
+        assert_eq!(parsed, UnitRanged::MIN);
+    }
+
+    #[test]
+    fn accepts_boundary_one() {
+        let parsed: UnitRanged = serde_json::from_str("1").unwrap();
+        assert_eq!(parsed, UnitRanged::MAX);
+    }
+}
